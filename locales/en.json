@@ -1,0 +1,18 @@
+{
+  "lang": "en",
+  "start": "Start anonymously — one tap",
+  "optional_context": "Add gender or note if hormones/physical factors may be relevant. Stored locally by default.",
+  "summarize": "Summarize & Draft",
+  "reminder_title": "Email reminder (optional)",
+  "reminder_desc": "Get a one-time email reminder to revisit your session.",
+  "email_placeholder": "your email (example: name@example.com)",
+  "hours": "hours",
+  "days": "days",
+  "custom": "Custom",
+  "reminder_consent": "I consent to a one-time reminder email to this address.",
+  "set_reminder": "Set reminder",
+  "working": "Working…",
+  "reminder_require_consent": "Please provide an email and consent to receive a reminder.",
+  "reminder_sent_ok": "Reminder scheduled — check your email when it arrives.",
+  "reminder_sent_error": "Could not schedule reminder. Try again later."
+}
