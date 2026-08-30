@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/router';
 import ContextPanel from '../../components/ContextPanel';
 import Chat from '../../components/Chat';
+import ReminderPanel from '../../components/ReminderPanel';
 import { downloadICS } from '../../utils/ics';
 
 type Message = { id: string; sender: 'user' | 'system'; text: string; ts: string };
@@ -12,9 +13,25 @@ export default function SessionPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [replying, setReplying] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
   const [safetyFlag, setSafetyFlag] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const t: any = {
+    reminder_title: 'Email reminder',
+    reminder_desc: 'Get an email reminder to check back in.',
+    email_placeholder: 'you@example.com',
+    hours: 'hours',
+    days: 'days',
+    custom: 'Custom',
+    reminder_consent: 'I consent to receive this reminder email.',
+    reminder_require_consent: 'Please enter an email and check consent.',
+    reminder_sent_ok: 'Reminder set!',
+    reminder_sent_error: 'Something went wrong setting the reminder.',
+    working: 'Working…',
+    set_reminder: 'Set reminder',
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -43,6 +60,7 @@ export default function SessionPage() {
       ts: new Date().toISOString(),
     };
     setMessages((m) => [...m, msg]);
+    const sentText = input;
     setInput('');
     // persist via API (best effort)
     fetch('/api/message', {
@@ -50,6 +68,37 @@ export default function SessionPage() {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ sessionId: id, message: msg }),
     }).catch(() => {});
+
+    // get a live caring reply
+    setReplying(true);
+    const context = localStorage.getItem('ff_context');
+    const recentHistory = messages.slice(-6).map((m) => `${m.sender}: ${m.text}`).join('\n');
+    try {
+      const res = await fetch('/api/respond', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          message: sentText,
+          recentHistory,
+          context: context ? JSON.parse(context) : null,
+        }),
+      });
+      const data = await res.json();
+      if (data.reply) {
+        const replyMsg: Message = {
+          id: crypto.randomUUID(),
+          sender: 'system',
+          text: data.reply,
+          ts: new Date().toISOString(),
+        };
+        setMessages((m) => [...m, replyMsg]);
+        if (data.safety) setSafetyFlag(true);
+      }
+    } catch (e) {
+      // fail silently, don't block the user's own message
+    } finally {
+      setReplying(false);
+    }
   }
 
   async function handleSummarize() {
@@ -86,7 +135,7 @@ export default function SessionPage() {
         <div className="bg-white p-4 rounded shadow flex justify-between items-start">
           <div>
             <h2 className="text-lg font-medium">Anonymous session</h2>
-            <p className="text-sm text-gray-500">Write freely. Optional context will help the summary.</p>
+            <p className="text-sm text-gray-500">Write freely — I'm here and listening. (I'm an AI companion, not a human or therapist.)</p>
           </div>
           <div>
             <button className="text-sm text-indigo-600" onClick={() => router.push('/')}>Exit</button>
@@ -96,12 +145,15 @@ export default function SessionPage() {
         <div className="mt-4 space-y-4">
           <ContextPanel />
           <Chat messages={messages} />
+          {replying && (
+            <div className="text-sm text-gray-400 italic">typing…</div>
+          )}
           <div className="flex gap-2">
             <input
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Write what’s on your mind…"
+              placeholder="Write what's on your mind…"
               className="flex-1 px-3 py-2 border rounded"
               onKeyDown={(e) => { if (e.key === 'Enter') sendMessage(); }}
             />
@@ -117,6 +169,8 @@ export default function SessionPage() {
               Copy link to return
             </button>
           </div>
+
+          <ReminderPanel sessionId={id as string} defaultSummary={summary} t={t} />
 
           {safetyFlag && (
             <div className="p-3 bg-red-50 border-l-4 border-red-400 text-red-700 rounded">
