@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { generateWithFallback } from '../../lib/gemini';
 
 const RISK_KEYWORDS = ['suicide', 'kill myself', 'end my life', 'harm myself', 'want to die'];
 
@@ -14,9 +14,11 @@ function detectRisk(text: string) {
 }
 
 function stripCodeFence(text: string) {
-  // Remove ```json ... ``` or ``` ... ``` wrappers if present
   return text.replace(/```json\s*/gi, '').replace(/```/g, '').trim();
 }
+
+const RATE_LIMIT_FALLBACK = "I couldn't quite finish putting your summary together just now — I'm a bit backed up. Try again in a minute?";
+const OTHER_ERROR_FALLBACK = "Something went wrong while summarizing. Please try again.";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).end();
@@ -34,22 +36,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const contextLine = context && context.physicalNote ? `User noted: ${context.physicalNote}` : '';
   const prompt = `${systemPrompt}\n\nContext: ${contextLine}\n\nConversation:\n${sanitized}\n\nRespond with a JSON object: {"summary":"<3-5 sentence summary>","draft":"<1-2 sentence draft>"} only. Do not wrap it in code fences or backticks.`;
 
-  try {
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
-    const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
+  const outcome = await generateWithFallback(prompt);
 
-    const result = await model.generateContent(prompt);
-    const reply = result.response.text() ?? '';
-
-    const cleaned = stripCodeFence(reply);
-    const jsonStart = cleaned.indexOf('{');
-    const jsonStr = jsonStart >= 0 ? cleaned.slice(jsonStart) : cleaned;
-    let parsed = null;
-    try { parsed = JSON.parse(jsonStr); } catch (e) { parsed = { summary: cleaned, draft: '' }; }
-
-    res.status(200).json({ safety: false, summary: `${parsed.summary}\n\n${parsed.draft}`.trim() });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'llm_error' });
+  if (!outcome.ok) {
+    const fallbackText = outcome.reason === 'rate_limited' ? RATE_LIMIT_FALLBACK : OTHER_ERROR_FALLBACK;
+    return res.status(200).json({ safety: false, summary: fallbackText, fallback: true });
   }
+
+  const cleaned = stripCodeFence(outcome.text);
+  const jsonStart = cleaned.indexOf('{');
+  const jsonStr = jsonStart >= 0 ? cleaned.slice(jsonStart) : cleaned;
+  let parsed = null;
+  try { parsed = JSON.parse(jsonStr); } catch (e) { parsed = { summary: cleaned, draft: '' }; }
+
+  res.status(200).json({ safety: false, summary: `${parsed.summary}\n\n${parsed.draft}`.trim() });
 }

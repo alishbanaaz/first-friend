@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { generateWithFallback } from '../../lib/gemini';
 
 const RISK_KEYWORDS = ['suicide', 'kill myself', 'end my life', 'harm myself', 'want to die', 'no reason to live', 'better off dead', 'hurting myself'];
 
@@ -26,6 +26,9 @@ Rules for how you talk:
 - Use casual, natural phrasing ("that sounds rough," "ugh, I'm sorry," "that's a lot to carry") instead of formal wording.
 - Reply with plain text only. No JSON, no markdown, no code fences.`;
 
+const RATE_LIMIT_FALLBACK = "Sorry, I'm a little overwhelmed right now — give me just a moment and try sending that again in a bit? I promise I'm still here.";
+const OTHER_ERROR_FALLBACK = "Hmm, something went sideways on my end. Mind trying that again?";
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).end();
   const { message, recentHistory, context } = req.body as { message: string; recentHistory?: string; context?: any };
@@ -42,14 +45,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const prompt = `${SYSTEM_PROMPT}\n\n${contextLine}\n\n${historyLine}Their latest message: "${message}"\n\nReply as their caring friend would, following the rules above.`;
 
-  try {
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
-    const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
-    const result = await model.generateContent(prompt);
-    const reply = stripCodeFence(result.response.text() ?? '');
-    res.status(200).json({ safety: false, reply });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'llm_error' });
+  const outcome = await generateWithFallback(prompt);
+
+  if (!outcome.ok) {
+    const fallbackReply = outcome.reason === 'rate_limited' ? RATE_LIMIT_FALLBACK : OTHER_ERROR_FALLBACK;
+    return res.status(200).json({ safety: false, reply: fallbackReply, fallback: true });
   }
+
+  const reply = stripCodeFence(outcome.text);
+  res.status(200).json({ safety: false, reply });
 }
